@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pro Drawing App – Debugged</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<style>
+  body,html { margin:0; padding:0; height:100vh; overflow:hidden; }
+  .hidden { display:none; }
+  #titleScreen {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:#222; color:#fff;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    font-family:sans-serif;
+  }
+  #titleScreen button {
+    margin:10px; padding:15px 30px; font-size:18px;
+    background:#444; color:#fff; border:none; border-radius:5px;
+    cursor:pointer; transition:transform 0.1s;
+  }
+  #titleScreen button:active { transform:scale(0.95); }
+  #modalOverlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.7); color:#fff;
+    display:none; justify-content:center; align-items:center;
+    font-family:sans-serif;
+  }
+  #modal {
+    background:#333; padding:20px; border-radius:8px; max-width:600px;
+  }
+  #modal button { margin-top:10px; }
+  #appScreen { display:none; flex-direction:column; height:100vh; }
+  #toolbar {
+    background:#333; padding:10px;
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  }
+  button, select, input {
+    background:#444; color:#fff; border:none;
+    padding:5px; border-radius:4px; cursor:pointer;
+    transition:transform 0.1s;
+  }
+  button:active { transform:scale(0.95); }
+  button.active { background:#0d6efd; }
+  canvas { flex:1; background:#fff; cursor:crosshair; }
+</style>
+</head>
+<body>
+  <div id="titleScreen">
+    <h1>Pro Drawing App</h1>
+    <button id="startApp">Enter App</button>
+    <button id="howTo">How to Use</button>
+  </div>
+
+  <div id="modalOverlay">
+    <div id="modal">
+      <h2>How to Use</h2>
+      <ul>
+        <li>Select tools: Pencil, Line, or Select</li>
+        <li>Insert shapes via dropdown</li>
+        <li>Select and drag shapes; resize via corner handles</li>
+        <li>Right-click to confirm move/resize</li>
+        <li>Use Delete, Back, Front, Clear, Undo, Export</li>
+      </ul>
+      <button id="closeModal">Close</button>
+    </div>
+  </div>
+
+  <div id="appScreen">
+    <div id="toolbar">
+      <button id="pencilBtn" class="active">Pencil 🖊️</button>
+      <button id="lineBtn">Line 📏</button>
+      <button id="selectBtn">Select 🖱️</button>
+      <select id="shapeSelect">
+        <option value="">Insert Shape</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="circle">Circle</option>
+        <option value="triangle">Triangle</option>
+      </select>
+      <button id="deleteBtn">Delete</button>
+      <button id="backBtn">Send Backward</button>
+      <button id="frontBtn">Bring Forward</button>
+      <button id="clearBtn">Clear</button>
+      <button id="undoBtn">Undo</button>
+      <button id="exportBtn">Export PNG</button>
+    </div>
+    <canvas id="canvas"></canvas>
+  </div>
+
+<script>
+  const titleScreen = document.getElementById('titleScreen');
+  const appScreen = document.getElementById('appScreen');
+  const modalOverlay = document.getElementById('modalOverlay');
+  document.getElementById('startApp').onclick = () => {
+    titleScreen.classList.add('hidden');
+    appScreen.style.display = 'flex';
+  };
+  document.getElementById('howTo').onclick = () => modalOverlay.style.display = 'flex';
+  document.getElementById('closeModal').onclick = () => modalOverlay.style.display = 'none';
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let tool = 'pencil', drawing = false, drag = false;
+  let brushColor = '#000', brushSize = 5, brushOpacity = 1;
+  let objects = [], history = [], selected = null;
+  let offsetX = 0, offsetY = 0, currentHandle = null;
+
+  const pencilBtn  = document.getElementById('pencilBtn');
+  const lineBtn    = document.getElementById('lineBtn');
+  const selectBtn  = document.getElementById('selectBtn');
+  const shapeSelect= document.getElementById('shapeSelect');
+  const deleteBtn  = document.getElementById('deleteBtn');
+  const backBtn    = document.getElementById('backBtn');
+  const frontBtn   = document.getElementById('frontBtn');
+  const clearBtn   = document.getElementById('clearBtn');
+  const undoBtn    = document.getElementById('undoBtn');
+  const exportBtn  = document.getElementById('exportBtn');
+
+  function setTool(t) {
+    tool = t;
+    [pencilBtn, lineBtn, selectBtn].forEach(b => b.classList.remove('active'));
+    ({pencil: pencilBtn, line: lineBtn, select: selectBtn})[t]?.classList.add('active');
+    selected = (t !== 'select') ? null : selected;
+    redraw();
+  }
+  pencilBtn.onclick  = () => setTool('pencil');
+  lineBtn.onclick    = () => setTool('line');
+  selectBtn.onclick  = () => setTool('select');
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+    redraw();
+  }
+
+  function saveHistory() {
+    history.push(JSON.stringify(objects));
+  }
+  undoBtn.onclick = () => {
+    if(history.length) {
+      objects = JSON.parse(history.pop());
+      selected = null;
+      redraw();
+    }
+  };
+
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    objects.forEach(o => drawObject(o));
+    if (selected) drawSelection(selected);
+  }
+
+  function drawObject(o) {
+    ctx.globalAlpha = o.opacity;
+    ctx.strokeStyle = ctx.fillStyle = o.color;
+    ctx.lineWidth = (o.type === 'shape' ? 0 : o.size);
+    if (o.type === 'pencil') {
+      ctx.beginPath();
+      ctx.moveTo(o.points[0].x, o.points[0].y);
+      o.points.forEach((p, i) => i && ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    } else if (o.type === 'line') {
+      ctx.beginPath();
+      ctx.moveTo(o.points[0].x, o.points[0].y);
+      ctx.lineTo(o.points[1].x, o.points[1].y);
+      ctx.stroke();
+    } else if (o.type === 'shape') {
+      ctx.beginPath();
+      if (o.shape === 'rectangle') ctx.fillRect(o.x, o.y, o.w, o.h);
+      else if (o.shape === 'circle') {
+        ctx.arc(o.x + o.w / 2, o.y + o.h / 2, Math.min(o.w, o.h) / 2, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (o.shape === 'triangle') {
+        ctx.moveTo(o.x + o.w / 2, o.y);
+        ctx.lineTo(o.x, o.y + o.h);
+        ctx.lineTo(o.x + o.w, o.y + o.h);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawSelection(o) {
+    const {x, y, w, h} = getBounds(o);
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+
+  function getBounds(o) {
+    if (o.type === 'shape') return {x: o.x, y: o.y, w: o.w, h: o.h};
+    const xs = o.points.map(p => p.x), ys = o.points.map(p => p.y);
+    const x = Math.min(...xs), y = Math.min(...ys);
+    return {x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y};
+  }
+
+  canvas.onmousedown = e => {
+    const x = e.offsetX, y = e.offsetY;
+    if (tool === 'pencil' || tool === 'line') {
+      saveHistory();
+      drawing = true;
+      const obj = { type: tool, points: [{x, y}], color: brushColor, size: brushSize, opacity: brushOpacity };
+      if (tool === 'line') obj.points.push({x, y});
+      objects.push(obj);
+    } else if (tool === 'select') {
+      const bounds = selected ? getBounds(selected) : null;
+      if (bounds && isInHandles(bounds, x, y)) {
+        drag = true; return;
+      }
+      saveHistory();
+      selected = objects.slice().reverse().find(o => {
+        const b = getBounds(o);
+        return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+      });
+      if (selected) {
+        const b = getBounds(selected);
+        offsetX = x - b.x;
+        offsetY = y - b.y;
+        drag = true;
+      }
+      redraw();
+    }
+  };
+
+  canvas.onmousemove = e => {
+    const x = e.offsetX, y = e.offsetY;
+    if (drawing) {
+      const obj = objects[objects.length - 1];
+      if (obj.type === 'pencil') obj.points.push({x, y});
+      else if (obj.type === 'line') obj.points[1] = {x, y};
+      redraw();
+    } else if (tool === 'select' && drag && selected) {
+      const b = getBounds(selected);
+      selected.x = x - offsetX;
+      selected.y = y - offsetY;
+      redraw();
+    }
+  };
+
+  canvas.onmouseup = () => { drawing = false; drag = false; };
+
+  canvas.oncontextmenu = e => e.preventDefault();
+
+  shapeSelect.onchange = () => {
+    const v = shapeSelect.value;
+    if (v) {
+      saveHistory();
+      const w = 100, h = 60;
+      objects.push({ type: 'shape', shape: v, x: canvas.width/2 - w/2, y: canvas.height/2 - h/2, w, h, color: brushColor, opacity: brushOpacity });
+      shapeSelect.value = '';
+      redraw();
+    }
+  };
+
+  deleteBtn.onclick = () => {
+    if (selected) {
+      saveHistory();
+      objects = objects.filter(o => o !== selected);
+      selected = null;
+      redraw();
+    }
+  };
+  backBtn.onclick = () => {
+    if (selected) {
+      saveHistory();
+      const i = objects.indexOf(selected);
+      if (i > 0) objects.splice(i, 1), objects.splice(i - 1, 0, selected);
+      redraw();
+    }
+  };
+  frontBtn.onclick = () => {
+    if (selected) {
+      saveHistory();
+      const i = objects.indexOf(selected);
+      if (i < objects.length - 1) objects.splice(i, 1), objects.splice(i + 1, 0, selected);
+      redraw();
+    }
+  };
+  clearBtn.onclick = () => {
+    saveHistory();
+    objects = [];
+    selected = null;
+    redraw();
+  };
+  exportBtn.onclick = () => {
+    const a = document.createElement('a');
+    a.download = 'drawing.png';
+    a.href = canvas.toDataURL();
+    a.click();
+  };
+
+  // Brush settings (hardcoded defaults)
+  brushSize = 5;
+  brushColor = '#000';
+  brushOpacity = 1;
+</script>
+</body>
+</html>
