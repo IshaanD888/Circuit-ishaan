@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Advanced Drawing App</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    #toolbar {
+      display: flex;
+      gap: 10px;
+      padding: 10px;
+      background: #f0f0f0;
+      align-items: center;
+    }
+    canvas {
+      border-top: 1px solid #ccc;
+      cursor: crosshair;
+      display: block;
+    }
+    #folderName {
+      width: 100px;
+    }
+    .selected {
+      outline: 2px dashed #333;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <label>Color: <input type="color" id="colorPicker" value="#000000"></label>
+    <label>Size: <input type="range" id="sizePicker" min="1" max="20" value="5"></label>
+    <button id="eraserBtn">Eraser</button>
+    <button id="selectBtn">Select</button>
+    <input id="folderName" placeholder="Folder name (e.g. Gina)">
+    <button onclick="saveDrawing()">Save</button>
+    <button onclick="loadDrawings()">Load All</button>
+    <button onclick="clearCanvas()">Clear</button>
+  </div>
+  <canvas id="canvas"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const sizePicker = document.getElementById('sizePicker');
+    const folderInput = document.getElementById('folderName');
+    const eraserBtn = document.getElementById('eraserBtn');
+    const selectBtn = document.getElementById('selectBtn');
+
+    // Canvas sizing
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Drawing state
+    let drawing = false;
+    let isEraser = false;
+    let isSelecting = false;
+    let selection = null;
+    let copiedImage = null;
+    let startX, startY;
+
+    const history = [];
+    function saveHistory() {
+      history.push(canvas.toDataURL());
+      if (history.length > 50) history.shift(); // Limit history size
+    }
+
+    function undo() {
+      if (history.length > 0) {
+        const img = new Image();
+        img.src = history.pop();
+        img.onload = () => ctx.drawImage(img, 0, 0);
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'z') undo();
+      if (e.ctrlKey && e.key === 'c' && selection) copySelection();
+      if (e.ctrlKey && e.key === 'v' && copiedImage) pasteSelection();
+      if (e.key === 'Delete' && selection) deleteSelection();
+    });
+
+    function drawLine(e) {
+      if (!drawing || isSelecting) return;
+      ctx.lineTo(e.offsetX, e.offsetY);
+      ctx.strokeStyle = isEraser ? '#ffffff' : colorPicker.value;
+      ctx.lineWidth = sizePicker.value;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (isSelecting) {
+        selection = null;
+        startX = e.offsetX;
+        startY = e.offsetY;
+        return;
+      }
+      saveHistory();
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isSelecting && startX !== null) {
+        const endX = e.offsetX;
+        const endY = e.offsetY;
+        selection = {
+          x: Math.min(startX, endX),
+          y: Math.min(startY, endY),
+          w: Math.abs(endX - startX),
+          h: Math.abs(endY - startY)
+        };
+        drawCanvas();
+        if (selection.w > 0 && selection.h > 0) {
+          ctx.strokeStyle = '#000';
+          ctx.setLineDash([6]);
+          ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+          ctx.setLineDash([]);
+        }
+      } else {
+        drawLine(e);
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      drawing = false;
+      startX = null;
+    });
+    canvas.addEventListener('mouseleave', () => drawing = false);
+
+    function clearCanvas() {
+      saveHistory();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Eraser toggle
+    eraserBtn.addEventListener('click', () => {
+      isEraser = !isEraser;
+      eraserBtn.textContent = isEraser ? "Eraser ON" : "Eraser";
+    });
+
+    // Select tool toggle
+    selectBtn.addEventListener('click', () => {
+      isSelecting = !isSelecting;
+      selectBtn.textContent = isSelecting ? "Select ON" : "Select";
+      if (!isSelecting) selection = null;
+      drawCanvas();
+    });
+
+    function drawCanvas() {
+      const img = new Image();
+      img.src = canvas.toDataURL();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+    }
+
+    function copySelection() {
+      if (!selection) return;
+      copiedImage = ctx.getImageData(selection.x, selection.y, selection.w, selection.h);
+    }
+
+    function pasteSelection() {
+      if (!copiedImage) return;
+      saveHistory();
+      ctx.putImageData(copiedImage, 20, 20);
+    }
+
+    function deleteSelection() {
+      if (!selection) return;
+      saveHistory();
+      ctx.clearRect(selection.x, selection.y, selection.w, selection.h);
+      selection = null;
+      drawCanvas();
+    }
+
+    // IndexedDB saving
+    let db;
+    const request = indexedDB.open("DrawingAppDB", 1);
+    request.onerror = (e) => console.error("DB error", e);
+    request.onsuccess = (e) => db = e.target.result;
+    request.onupgradeneeded = (e) => {
+      db = e.target.result;
+      db.createObjectStore("drawings", { keyPath: "id" });
+    };
+
+    function saveDrawing() {
+      const folder = folderInput.value.trim();
+      if (!folder) return alert("Enter a folder name.");
+      const dataUrl = canvas.toDataURL();
+      const id = `${folder}_${Date.now()}`;
+      const tx = db.transaction("drawings", "readwrite");
+      const store = tx.objectStore("drawings");
+      store.put({ id, folder, image: dataUrl });
+      alert(`Saved to folder: ${folder}`);
+    }
+
+    function loadDrawings() {
+      const folder = folderInput.value.trim();
+      if (!folder) return alert("Enter a folder name.");
+      const tx = db.transaction("drawings", "readonly");
+      const store = tx.objectStore("drawings");
+      const drawings = [];
+      store.openCursor().onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          if (cursor.value.folder === folder) drawings.push(cursor.value);
+          cursor.continue();
+        } else {
+          if (drawings.length === 0) return alert("No drawings found.");
+          const img = new Image();
+          img.src = drawings[drawings.length - 1].image; // Load last
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+          };
+        }
+      };
+    }
+  </script>
+</body>
+</html>

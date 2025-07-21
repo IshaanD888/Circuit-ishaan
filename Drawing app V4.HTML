@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pro Drawing App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      --bg-color-light: #ffffff;
+      --text-color-light: #000000;
+      --accent-color-light: #007acc;
+      --canvas-bg-light: #f0f0f0;
+
+      --bg-color-dark: #1e1e1e;
+      --text-color-dark: #ffffff;
+      --accent-color-dark: #4fc3f7;
+      --canvas-bg-dark: #2c2c2c;
+    }
+
+    body.light-mode {
+      --bg-color: var(--bg-color-light);
+      --text-color: var(--text-color-light);
+      --accent-color: var(--accent-color-light);
+      --canvas-bg: var(--canvas-bg-light);
+    }
+
+    body.dark-mode {
+      --bg-color: var(--bg-color-dark);
+      --text-color: var(--text-color-dark);
+      --accent-color: var(--accent-color-dark);
+      --canvas-bg: var(--canvas-bg-dark);
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg-color);
+      color: var(--text-color);
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #toolbar {
+      display: flex;
+      gap: 10px;
+      padding: 10px;
+      background: var(--bg-color);
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #toolbar input,
+    #toolbar select,
+    #toolbar button {
+      background: #333;
+      color: #fff;
+      border: 1px solid #444;
+      padding: 6px;
+      border-radius: 5px;
+    }
+    #tabs {
+      display: flex;
+      gap: 5px;
+      background: #111;
+      padding: 5px 10px;
+    }
+    .tab {
+      padding: 5px 10px;
+      background: #444;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .tab.active {
+      background: var(--accent-color);
+      color: #000;
+    }
+    canvas {
+      flex: 1;
+      background: var(--canvas-bg);
+      display: block;
+    }
+  </style>
+</head>
+<body class="dark-mode">
+  <div id="tabs"></div>
+  <div id="toolbar">
+    <label>Color <input type="color" id="color"></label>
+    <label>Size <input type="range" id="size" min="1" max="20" value="5"></label>
+    <button id="eraser">Eraser</button>
+    <button id="select">Select</button>
+    <button id="line">Straight Line</button>
+    <button id="text">Add Text</button>
+    <input type="text" id="textInput" placeholder="Your text" />
+    <button onclick="addTab()">+ Tab</button>
+    <button onclick="undo()">Undo</button>
+    <button onclick="clearCanvas()">Clear</button>
+    <button onclick="toggleTheme()">Toggle Theme</button>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const tabs = document.getElementById('tabs');
+    const size = document.getElementById('size');
+    const color = document.getElementById('color');
+    const textInput = document.getElementById('textInput');
+
+    let mode = 'draw';
+    let tabsData = [];
+    let currentTab = 0;
+    let drawing = false;
+    let history = [];
+    let startX, startY;
+
+    function toggleTheme() {
+      document.body.classList.toggle('dark-mode');
+      document.body.classList.toggle('light-mode');
+    }
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight - tabs.offsetHeight;
+      restoreTab();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    function saveHistory() {
+      history.push(canvas.toDataURL());
+    }
+
+    function undo() {
+      if (history.length > 0) {
+        const img = new Image();
+        img.src = history.pop();
+        img.onload = () => ctx.drawImage(img, 0, 0);
+      }
+    }
+
+    function addTab() {
+      const tab = document.createElement('div');
+      tab.className = 'tab';
+      const index = tabsData.length;
+      tab.textContent = `Tab ${index + 1}`;
+      tab.onclick = () => switchTab(index);
+      tabs.appendChild(tab);
+      tabsData.push(null);
+      switchTab(index);
+    }
+
+    function switchTab(index) {
+      saveTab();
+      currentTab = index;
+      document.querySelectorAll('.tab').forEach((t, i) => {
+        t.classList.toggle('active', i === index);
+      });
+      restoreTab();
+    }
+
+    function saveTab() {
+      tabsData[currentTab] = canvas.toDataURL();
+    }
+
+    function restoreTab() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (tabsData[currentTab]) {
+        const img = new Image();
+        img.src = tabsData[currentTab];
+        img.onload = () => ctx.drawImage(img, 0, 0);
+      }
+    }
+
+    function clearCanvas() {
+      saveHistory();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    document.getElementById('eraser').onclick = () => mode = 'eraser';
+    document.getElementById('select').onclick = () => mode = 'select';
+    document.getElementById('line').onclick = () => mode = 'line';
+    document.getElementById('text').onclick = () => mode = 'text';
+
+    canvas.addEventListener('mousedown', e => {
+      startX = e.offsetX;
+      startY = e.offsetY;
+      if (mode === 'text') {
+        ctx.fillStyle = color.value;
+        ctx.font = `${parseInt(size.value) * 2}px Arial`;
+        ctx.fillText(textInput.value, startX, startY);
+        saveHistory();
+        return;
+      }
+      drawing = true;
+      if (mode === 'draw' || mode === 'eraser') {
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (!drawing) return;
+      if (mode === 'draw' || mode === 'eraser') {
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.strokeStyle = mode === 'eraser' ? getComputedStyle(document.body).getPropertyValue('--canvas-bg') : color.value;
+        ctx.lineWidth = size.value;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener('mouseup', e => {
+      if (!drawing) return;
+      drawing = false;
+      if (mode === 'line') {
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.strokeStyle = color.value;
+        ctx.lineWidth = size.value;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+      saveHistory();
+    });
+
+    window.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'z') {
+        undo();
+      }
+    });
+
+    // Init
+    addTab();
+    resizeCanvas();
+  </script>
+</body>
+</html>

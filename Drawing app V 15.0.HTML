@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drawing App – Debugged Right-Click + Button Animation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin:0; font-family:sans-serif;
+      display:flex; flex-direction:column;
+      height:100vh; background:#222; color:#fff;
+    }
+    #toolbar {
+      background:#333; padding:10px;
+      display:flex; flex-wrap:wrap; gap:10px;
+      align-items:center;
+    }
+    button, select, input[type="color"], input[type="range"], input[type="number"] {
+      background:#444; color:#fff;
+      border:none; padding:5px; border-radius:4px;
+      cursor:pointer; transition: transform 0.1s ease;
+    }
+    button:active {
+      transform: scale(0.95);
+    }
+    button.active {
+      background: #0d6efd;
+    }
+    canvas {
+      flex:1; display:block;
+      background:#fff; cursor:crosshair;
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="pencilBtn" class="active">Pencil 🖊️</button>
+  <button id="lineBtn">Line 📏</button>
+  <button id="selectBtn">Select 🖱️</button>
+  <label>Size: <input type="range" id="sizeInp" min="1" max="30" value="5"></label>
+  <label>Opacity: <input type="range" id="opacityInp" min="0.1" max="1" step="0.1" value="1"></label>
+  <label>Color: <input type="color" id="colorInp" value="#000000"></label>
+  <label>Shape:
+    <select id="shapeSelect">
+      <option value="">Insert Shape</option>
+      <option value="rectangle">Rectangle</option>
+      <option value="circle">Circle</option>
+      <option value="triangle">Triangle</option>
+    </select>
+  </label>
+  <label>Width: <input type="number" id="shapeW" min="10" value="100" style="width:60px;"></label>
+  <label>Height: <input type="number" id="shapeH" min="10" value="60" style="width:60px;"></label>
+  <button id="deleteBtn">Delete</button>
+  <button id="back">Send Backward</button>
+  <button id="front">Bring Forward</button>
+  <button id="clear">Clear</button>
+  <button id="undoBtn">Undo</button>
+  <button id="exportBtn">Export PNG</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+let tool = 'pencil', drawing = false;
+let brushSize = 5, brushColor = '#000', brushOpacity = 1;
+let startX, startY;
+let dragged = false;
+let selected = null, offsetX = 0, offsetY = 0, confirmMove = false;
+let history = [], objects = [];
+
+const pencilBtn = document.getElementById('pencilBtn');
+const lineBtn   = document.getElementById('lineBtn');
+const selectBtn = document.getElementById('selectBtn');
+const sizeInp   = document.getElementById('sizeInp');
+const opacityInp= document.getElementById('opacityInp');
+const colorInp  = document.getElementById('colorInp');
+const shapeSelect = document.getElementById('shapeSelect');
+const shapeW = document.getElementById('shapeW');
+const shapeH = document.getElementById('shapeH');
+
+function setTool(newTool) {
+  if (tool === newTool) return;
+  tool = newTool;
+  [pencilBtn, lineBtn, selectBtn].forEach(btn => btn.classList.remove('active'));
+  ({ pencil:pencilBtn, line:lineBtn, select:selectBtn })[tool]?.classList.add('active');
+  selected = (tool !== 'select') ? null : selected;
+  confirmMove = false;
+  redraw();
+}
+
+pencilBtn.onclick = () => setTool('pencil');
+lineBtn.onclick   = () => setTool('line');
+selectBtn.onclick = () => setTool('select');
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+  redraw();
+}
+
+function saveHistory() {
+  history.push(JSON.stringify(objects));
+}
+
+function undo() {
+  if (history.length) {
+    objects = JSON.parse(history.pop());
+    selected = null;
+    confirmMove = false;
+    redraw();
+  }
+}
+
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  objects.forEach(obj => drawObject(obj));
+  if (selected) {
+    const x = getX(selected), y = getY(selected), w = getW(selected), h = getH(selected);
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([5,5]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = confirmMove ? 'lime' : 'red';
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+}
+
+function drawObject(obj) {
+  ctx.globalAlpha = obj.opacity;
+  ctx.lineWidth = obj.size;
+  ctx.strokeStyle = obj.color;
+  ctx.fillStyle = obj.color;
+  if (obj.type === 'path') {
+    ctx.beginPath();
+    ctx.moveTo(obj.points[0].x, obj.points[0].y);
+    obj.points.forEach((p, i) => i > 0 && ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+  } else if (obj.type === 'line') {
+    ctx.beginPath();
+    ctx.moveTo(obj.points[0].x, obj.points[0].y);
+    ctx.lineTo(obj.points[1].x, obj.points[1].y);
+    ctx.stroke();
+  } else if (obj.type === 'shape') {
+    ctx.beginPath();
+    if (obj.shape === 'rectangle') {
+      ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
+    } else if (obj.shape === 'circle') {
+      ctx.arc(obj.x + obj.w/2, obj.y + obj.h/2, Math.min(obj.w, obj.h)/2, 0, 2*Math.PI);
+      ctx.fill();
+    } else if (obj.shape === 'triangle') {
+      ctx.moveTo(obj.x + obj.w/2, obj.y);
+      ctx.lineTo(obj.x, obj.y + obj.h);
+      ctx.lineTo(obj.x + obj.w, obj.y + obj.h);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+canvas.addEventListener('mousedown', e => {
+  startX = e.offsetX;
+  startY = e.offsetY;
+  dragged = false;
+  confirmMove = false;
+  if (tool === 'select') {
+    for (let i = objects.length - 1; i >= 0; i--) {
+      if (isHit(objects[i], startX, startY)) {
+        selected = objects[i];
+        offsetX = startX - getX(selected);
+        offsetY = startY - getY(selected);
+        confirmMove = false;
+        redraw();
+        return;
+      }
+    }
+  } else {
+    saveHistory();
+    drawing = true;
+    selected = null;
+    if (tool === 'pencil') {
+      objects.push({ type:'path', points:[{x:startX, y:startY}], size:brushSize, color:brushColor, opacity:brushOpacity });
+    } else if (tool === 'line') {
+      objects.push({ type:'line', points:[{x:startX, y:startY}, {x:startX, y:startY}], size:brushSize, color:brushColor, opacity:brushOpacity });
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (tool === 'select' && selected && !confirmMove) {
+    dragged = true;
+    const dx = e.offsetX - offsetX - getX(selected);
+    const dy = e.offsetY - offsetY - getY(selected);
+    shift(selected, dx, dy);
+    redraw();
+  } else if (drawing) {
+    const obj = objects[objects.length - 1];
+    if (obj.type === 'path') {
+      obj.points.push({x:e.offsetX, y:e.offsetY});
+    } else if (obj.type === 'line') {
+      obj.points[1] = {x:e.offsetX, y:e.offsetY};
+    }
+    redraw();
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  drawing = false;
+  if (tool !== 'select') selected = null;
+  redraw();
+});
+
+canvas.addEventListener('contextmenu', e => {
+  if (tool === 'select' && dragged && selected) {
+    e.preventDefault();
+    confirmMove = true;
+    redraw();
+  }
+});
+
+function isHit(o, x,y) {
+  const ox = getX(o), oy = getY(o), w = getW(o), h = getH(o);
+  return x >= ox && x <= ox + w && y >= oy && y <= oy + h;
+}
+
+function getX(o) {
+  if (o.type==='path') return Math.min(...o.points.map(p=>p.x));
+  if (o.type==='line') return Math.min(o.points[0].x, o.points[1].x);
+  return o.x;
+}
+function getY(o) {
+  if (o.type==='path') return Math.min(...o.points.map(p=>p.y));
+  if (o.type==='line') return Math.min(o.points[0].y, o.points[1].y);
+  return o.y;
+}
+function getW(o) {
+  if (o.type==='path') return Math.max(...o.points.map(p=>p.x)) - getX(o);
+  if (o.type==='line') return Math.abs(o.points[1].x - o.points[0].x);
+  return o.w;
+}
+function getH(o) {
+  if (o.type==='path') return Math.max(...o.points.map(p=>p.y)) - getY(o);
+  if (o.type==='line') return Math.abs(o.points[1].y - o.points[0].y);
+  return o.h;
+}
+function shift(o, dx, dy) {
+  if (o.type==='path' || o.type==='line') {
+    o.points = o.points.map(p=>({x:p.x+dx, y:p.y+dy}));
+  } else {
+    o.x += dx;
+    o.y += dy;
+  }
+}
+
+sizeInp.oninput = e => brushSize = parseInt(e.target.value);
+opacityInp.oninput = e => brushOpacity = parseFloat(e.target.value);
+colorInp.oninput = e => brushColor = e.target.value;
+
+shapeSelect.onchange = () => {
+  const shape = shapeSelect.value;
+  if (!shape) return;
+  const w = parseInt(shapeW.value), h = parseInt(shapeH.value);
+  saveHistory();
+  objects.push({
+    type:'shape', shape,
+    x: canvas.width/2 - w/2,
+    y: canvas.height/2 - h/2,
+    w, h,
+    size:0, // no border stroke
+    color:brushColor, opacity:brushOpacity
+  });
+  selected = null;
+  shapeSelect.value = '';
+  redraw();
+};
+
+document.getElementById('deleteBtn').onclick = () => {
+  if (selected) {
+    objects = objects.filter(o=>o!==selected);
+    selected = null;
+    redraw();
+  }
+};
+document.getElementById('back').onclick = () => {
+  if (selected) {
+    const idx = objects.indexOf(selected);
+    if (idx > 0) objects.splice(idx,1), objects.splice(idx-1,0,selected), redraw();
+  }
+};
+document.getElementById('front').onclick = () => {
+  if (selected) {
+    const idx = objects.indexOf(selected);
+    if (idx < objects.length -1) objects.splice(idx,1), objects.splice(idx+1,0,selected), redraw();
+  }
+};
+document.getElementById('clear').onclick = () => {
+  saveHistory(); objects = []; selected = null; redraw();
+};
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('exportBtn').onclick = () => {
+  const a = document.createElement('a');
+  a.download='drawing.png';
+  a.href=canvas.toDataURL();
+  a.click();
+};
+</script>
+
+</body>
+</html>

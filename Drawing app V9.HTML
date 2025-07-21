@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pro Drawing App Enhanced</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #222;
+      color: #fff;
+    }
+    #toolbar {
+      background: #333;
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    #toolbar input,
+    #toolbar select,
+    #toolbar button {
+      background: #444;
+      color: #fff;
+      border: none;
+      padding: 5px;
+      border-radius: 5px;
+    }
+    #palette {
+      display: flex;
+      gap: 5px;
+    }
+    .swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    canvas {
+      flex: 1;
+      background: #fff;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <label>Brush:
+      <select id="brushType">
+        <option value="pencil">Pencil</option>
+        <option value="marker">Marker</option>
+        <option value="spray">Spray</option>
+      </select>
+    </label>
+    <label>Size: <input type="range" id="size" min="1" max="30" value="5"></label>
+    <label>Opacity: <input type="range" id="opacity" min="0.1" max="1" step="0.1" value="1"></label>
+    <label>Color: <input type="color" id="color" value="#000000"></label>
+    <div id="palette">
+      <div class="swatch" style="background:#e74c3c"></div>
+      <div class="swatch" style="background:#f1c40f"></div>
+      <div class="swatch" style="background:#2ecc71"></div>
+      <div class="swatch" style="background:#3498db"></div>
+    </div>
+    <label><input type="checkbox" id="gridToggle"> Show Grid</label>
+    <label>Grid Size: <input type="range" id="gridSize" min="10" max="100" step="10" value="20"></label>
+    <button id="clear">Clear</button>
+    <button id="undo">Undo</button>
+    <button id="export">Export PNG</button>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let brushType = 'pencil';
+    let brushSize = 5;
+    let brushColor = '#000';
+    let brushOpacity = 1;
+    let history = [];
+    let showGrid = false;
+    let gridSize = 20;
+
+    const sndDraw = new Audio('https://actions.google.com/sounds/v1/foley/pen_click.ogg');
+    const sndUndo = new Audio('https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg');
+    const sndClear = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+      redraw();
+    }
+
+    function saveHistory() {
+      history.push(canvas.toDataURL());
+    }
+
+    function redraw() {
+      if (history.length) {
+        const img = new Image();
+        img.src = history[history.length - 1];
+        img.onload = () => ctx.drawImage(img, 0, 0);
+      }
+      if (showGrid) drawGrid();
+    }
+
+    function drawGrid() {
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 0.5;
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+      saveHistory();
+      sndDraw.play();
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing) return;
+      ctx.globalAlpha = brushOpacity;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = brushColor;
+      ctx.fillStyle = brushColor;
+
+      if (brushType === 'spray') {
+        for (let i = 0; i < 20; i++) {
+          const offsetX = Math.random() * brushSize - brushSize / 2;
+          const offsetY = Math.random() * brushSize - brushSize / 2;
+          ctx.fillRect(e.offsetX + offsetX, e.offsetY + offsetY, 1, 1);
+        }
+      } else {
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      drawing = false;
+      ctx.closePath();
+      ctx.globalAlpha = 1;
+    });
+
+    document.getElementById('brushType').onchange = e => brushType = e.target.value;
+    document.getElementById('size').oninput = e => brushSize = e.target.value;
+    document.getElementById('color').oninput = e => brushColor = e.target.value;
+    document.getElementById('opacity').oninput = e => brushOpacity = parseFloat(e.target.value);
+    document.getElementById('gridToggle').onchange = e => {
+      showGrid = e.target.checked;
+      redraw();
+    };
+    document.getElementById('gridSize').oninput = e => {
+      gridSize = parseInt(e.target.value);
+      if (showGrid) redraw();
+    };
+
+    document.getElementById('clear').onclick = () => {
+      sndClear.play();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (showGrid) drawGrid();
+    };
+
+    document.getElementById('undo').onclick = () => {
+      if (history.length > 0) {
+        sndUndo.play();
+        history.pop();
+        redraw();
+      }
+    };
+
+    document.getElementById('export').onclick = () => {
+      const link = document.createElement('a');
+      link.download = 'drawing.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    };
+
+    document.querySelectorAll('.swatch').forEach(swatch => {
+      swatch.onclick = () => {
+        brushColor = window.getComputedStyle(swatch).backgroundColor;
+        document.getElementById('color').value = rgbToHex(brushColor);
+      };
+    });
+
+    function rgbToHex(rgb) {
+      const result = rgb.match(/\d+/g).map(x => parseInt(x).toString(16).padStart(2, '0'));
+      return '#' + result.join('');
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+  </script>
+</body>
+</html>

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pro Drawing App Ultimate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #222;
+      color: #fff;
+    }
+    #toolbar {
+      background: #333;
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    #toolbar input,
+    #toolbar select,
+    #toolbar button {
+      background: #444;
+      color: #fff;
+      border: none;
+      padding: 5px;
+      border-radius: 5px;
+    }
+    #palette {
+      display: flex;
+      gap: 5px;
+    }
+    .swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    canvas {
+      flex: 1;
+      background: #fff;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <label>Tool:
+      <select id="tool">
+        <option value="pencil">Pencil</option>
+        <option value="line">Straight Line</option>
+        <option value="text">Text</option>
+        <option value="select">Select</option>
+      </select>
+    </label>
+    <label>Size: <input type="range" id="size" min="1" max="30" value="5"></label>
+    <label>Opacity: <input type="range" id="opacity" min="0.1" max="1" step="0.1" value="1"></label>
+    <label>Color: <input type="color" id="color" value="#000000"></label>
+    <input type="text" id="textInput" placeholder="Type text" />
+    <label>Shape:
+      <select id="shapeSelect">
+        <option value="">Insert Shape</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="circle">Circle</option>
+        <option value="triangle">Triangle</option>
+      </select>
+    </label>
+    <button id="clear">Clear</button>
+    <button id="undo">Undo</button>
+    <button id="export">Export PNG</button>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let tool = 'pencil';
+    let brushSize = 5;
+    let brushColor = '#000';
+    let brushOpacity = 1;
+    let history = [];
+    let shapes = [];
+    let selectedShape = null;
+    let startX, startY;
+
+    const textInput = document.getElementById('textInput');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+      redraw();
+    }
+
+    function saveHistory() {
+      history.push(canvas.toDataURL());
+    }
+
+    function redraw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (history.length) {
+        const img = new Image();
+        img.src = history[history.length - 1];
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0);
+          drawShapes();
+        };
+      } else {
+        drawShapes();
+      }
+    }
+
+    function drawShapes() {
+      for (let shape of shapes) {
+        ctx.fillStyle = shape.color;
+        ctx.beginPath();
+        if (shape.type === 'rectangle') {
+          ctx.fillRect(shape.x, shape.y, shape.w, shape.h);
+        } else if (shape.type === 'circle') {
+          ctx.arc(shape.x + shape.w/2, shape.y + shape.h/2, Math.min(shape.w, shape.h)/2, 0, 2*Math.PI);
+          ctx.fill();
+        } else if (shape.type === 'triangle') {
+          ctx.moveTo(shape.x + shape.w/2, shape.y);
+          ctx.lineTo(shape.x, shape.y + shape.h);
+          ctx.lineTo(shape.x + shape.w, shape.y + shape.h);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      drawing = true;
+      startX = e.offsetX;
+      startY = e.offsetY;
+
+      if (tool === 'text') {
+        saveHistory();
+        ctx.globalAlpha = brushOpacity;
+        ctx.fillStyle = brushColor;
+        ctx.font = `${brushSize * 3}px sans-serif`;
+        ctx.fillText(textInput.value, startX, startY);
+        ctx.globalAlpha = 1;
+        drawing = false;
+      } else if (tool === 'select') {
+        for (let shape of shapes) {
+          if (startX >= shape.x && startX <= shape.x + shape.w && startY >= shape.y && startY <= shape.y + shape.h) {
+            selectedShape = shape;
+            return;
+          }
+        }
+      } else if (tool === 'pencil') {
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        saveHistory();
+      } else if (tool === 'line') {
+        saveHistory();
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing) return;
+
+      if (tool === 'select' && selectedShape) {
+        selectedShape.x += e.movementX;
+        selectedShape.y += e.movementY;
+        redraw();
+      } else if (tool === 'pencil') {
+        ctx.globalAlpha = brushOpacity;
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = brushColor;
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (tool === 'line' && drawing) {
+        ctx.globalAlpha = brushOpacity;
+        ctx.lineWidth = brushSize;
+        ctx.strokeStyle = brushColor;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      drawing = false;
+      selectedShape = null;
+    });
+
+    document.getElementById('tool').onchange = e => tool = e.target.value;
+    document.getElementById('size').oninput = e => brushSize = e.target.value;
+    document.getElementById('color').oninput = e => brushColor = e.target.value;
+    document.getElementById('opacity').oninput = e => brushOpacity = parseFloat(e.target.value);
+
+    document.getElementById('clear').onclick = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      shapes = [];
+    };
+
+    document.getElementById('undo').onclick = () => {
+      if (history.length > 0) {
+        history.pop();
+        redraw();
+      }
+    };
+
+    document.getElementById('export').onclick = () => {
+      const link = document.createElement('a');
+      link.download = 'drawing.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    };
+
+    document.getElementById('shapeSelect').onchange = e => {
+      const shapeType = e.target.value;
+      if (!shapeType) return;
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      shapes.push({
+        type: shapeType,
+        x: centerX - 50,
+        y: centerY - 30,
+        w: 100,
+        h: 60,
+        color: brushColor
+      });
+      e.target.value = '';
+      redraw();
+    };
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+  </script>
+</body>
+</html>
