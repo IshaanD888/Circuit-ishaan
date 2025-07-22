@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drawing App + Eraser, Redo, Resizable Shapes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin:0; font-family:sans-serif;
+      display:flex; flex-direction:column;
+      height:100vh; background:#222; color:#fff;
+    }
+    #toolbar {
+      background:#333; padding:10px;
+      display:flex; flex-wrap:wrap; gap:10px;
+      align-items:center;
+    }
+    button, select, input[type="color"], input[type="range"], input[type="number"] {
+      background:#444; color:#fff;
+      border:none; padding:5px; border-radius:4px;
+      cursor:pointer; transition: transform 0.1s ease;
+    }
+    button:active { transform: scale(0.95); }
+    button.active { background: #0d6efd; }
+    canvas {
+      flex:1; display:block;
+      background:#fff; cursor:crosshair;
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="pencilBtn" class="active">Pencil</button>
+  <button id="eraserBtn">Eraser</button>
+  <button id="lineBtn">Line</button>
+  <button id="selectBtn">Select</button>
+  <label>Size: <input type="range" id="sizeInp" min="1" max="30" value="5"></label>
+  <label>Opacity: <input type="range" id="opacityInp" min="0.1" max="1" step="0.1" value="1"></label>
+  <label>Color: <input type="color" id="colorInp" value="#000000"></label>
+  <label>Shape:
+    <select id="shapeSelect">
+      <option value="">Insert Shape</option>
+      <option value="rectangle">Rectangle</option>
+      <option value="circle">Circle</option>
+      <option value="triangle">Triangle</option>
+    </select>
+  </label>
+  <label>W: <input type="number" id="shapeW" min="10" value="100" style="width:60px;"></label>
+  <label>H: <input type="number" id="shapeH" min="10" value="60" style="width:60px;"></label>
+  <button id="deleteBtn">Delete</button>
+  <button id="back">Backward</button>
+  <button id="front">Forward</button>
+  <button id="clear">Clear</button>
+  <button id="undoBtn">Undo</button>
+  <button id="redoBtn">Redo</button>
+  <button id="exportBtn">Export PNG</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+let tool = 'pencil', drawing=false;
+let brushSize=5, brushColor='#000', brushOpacity=1;
+let startX, startY, dragged=false, selected=null, offsetX=0, offsetY=0, confirmMove=false;
+let history=[], redoStack=[], objects=[];
+
+const pencilBtn=document.getElementById('pencilBtn'),
+      eraserBtn=document.getElementById('eraserBtn'),
+      lineBtn=document.getElementById('lineBtn'),
+      selectBtn=document.getElementById('selectBtn'),
+      sizeInp=document.getElementById('sizeInp'),
+      opacityInp=document.getElementById('opacityInp'),
+      colorInp=document.getElementById('colorInp'),
+      shapeSelect=document.getElementById('shapeSelect'),
+      shapeW=document.getElementById('shapeW'),
+      shapeH=document.getElementById('shapeH'),
+      deleteBtn=document.getElementById('deleteBtn'),
+      backBtn=document.getElementById('back'),
+      frontBtn=document.getElementById('front'),
+      clearBtn=document.getElementById('clear'),
+      undoBtn=document.getElementById('undoBtn'),
+      redoBtn=document.getElementById('redoBtn'),
+      exportBtn=document.getElementById('exportBtn');
+
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight - toolbar.offsetHeight; redraw(); }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function setTool(t){
+  tool = t;
+  [pencilBtn, eraserBtn, lineBtn, selectBtn].forEach(b=>b.classList.toggle('active', b.id === t+'Btn'));
+  if(tool!=='select') selected=null;
+  confirmMove=false; redraw();
+}
+pencilBtn.onclick = () => setTool('pencil');
+eraserBtn.onclick = () => setTool('eraser');
+lineBtn.onclick = () => setTool('line');
+selectBtn.onclick = () => setTool('select');
+
+sizeInp.oninput = e=>brushSize=parseInt(e.target.value);
+opacityInp.oninput = e=>brushOpacity=parseFloat(e.target.value);
+colorInp.oninput = e=>brushColor=e.target.value;
+
+shapeSelect.onchange = () => {
+  const s = shapeSelect.value;
+  if(!s) return;
+  saveHistory(); objects.push({
+    type:'shape', shape: s,
+    x:canvas.width/2-parseInt(shapeW.value)/2,
+    y:canvas.height/2-parseInt(shapeH.value)/2,
+    w:parseInt(shapeW.value),
+    h:parseInt(shapeH.value),
+    size:0, color:brushColor, opacity:brushOpacity
+  });
+  shapeSelect.value=''; redraw();
+};
+
+function saveHistory(){
+  history.push(JSON.stringify(objects));
+  redoStack=[];
+}
+function undo(){
+  if(history.length){
+    redoStack.push(JSON.stringify(objects));
+    objects=JSON.parse(history.pop());
+    selected=null; redraw();
+  }
+}
+function redo(){
+  if(redoStack.length){
+    history.push(JSON.stringify(objects));
+    objects=JSON.parse(redoStack.pop());
+    redraw();
+  }
+}
+undoBtn.onclick=undo;
+redoBtn.onclick=redo;
+
+canvas.onmousedown = e=>{
+  startX=e.offsetX; startY=e.offsetY;
+  dragged=false; confirmMove=false;
+  if(tool==='select'){
+    for(let i=objects.length-1;i>=0;i--){
+      const o=objects[i];
+      if(isHit(o,startX,startY)){
+        selected=o;
+        offsetX = startX - getX(o);
+        offsetY = startY - getY(o);
+        redraw(); return;
+      }
+    }
+    selected=null; redraw();
+  } else {
+    saveHistory();
+    drawing=true;
+    const color = tool==='eraser' ? '#fff' : brushColor;
+    if(tool==='pencil' || tool==='eraser'){
+      objects.push({type:'path',points:[{x:startX,y:startY}],size:brushSize,color,opacity:brushOpacity});
+    } else if(tool==='line'){
+      objects.push({type:'line',points:[{x:startX,y:startY},{x:startX,y:startY}],size:brushSize,color,opacity:brushOpacity});
+    }
+  }
+};
+
+canvas.onmousemove = e=>{
+  const x=e.offsetX,y=e.offsetY;
+  if((tool==='pencil'||tool==='eraser'||tool==='line') && drawing){
+    const o=objects[objects.length-1];
+    if(o.type==='path') o.points.push({x,y});
+    else o.points[1]={x,y};
+    redraw();
+  } else if(tool==='select' && selected){
