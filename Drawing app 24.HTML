@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Drawing App – Right-Click Select</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pacifico&display=swap');
+
+    body {
+      margin: 0; font-family: sans-serif;
+      display: flex; flex-direction: column; height: 100vh;
+      background: var(--bg); color: var(--fg);
+      --bg: #fff; --fg: #000;
+      --toolbar-bg: #eee; --btn-bg: #ddd; --btn-hover: #ccc;
+      transition: background .2s, color .2s;
+    }
+    .night {
+      --bg: #222; --fg: #eee;
+      --toolbar-bg: #333; --btn-bg: #444; --btn-hover: #555;
+    }
+    #toolbar {
+      background: var(--toolbar-bg); padding: 10px;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      user-select: none;
+    }
+    button, select, input {
+      background: var(--btn-bg); color: var(--fg);
+      border: none; padding: 5px 8px; border-radius: 4px;
+      cursor: pointer; transition: transform .1s, background .2s;
+    }
+    button:hover { background: var(--btn-hover); }
+    button:active { transform: scale(.95); }
+    button.active { background: #0d6efd; color: #fff; }
+    #colorPalette button {
+      width: 24px; height: 24px; padding: 0; border-radius: 4px;
+      margin-left: 4px;
+    }
+    canvas { flex: 1; background: #fff; cursor: crosshair; border-top: 2px solid #aaa; }
+
+    .labelText {
+      font-family: 'Pacifico', cursive;
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="pencilBtn">Pencil</button>
+  <button id="lineBtn">Line</button>
+  <button id="selectBtn">Select</button>
+  <button id="eraserBtn">Eraser</button>
+  <button id="textBtn">Text</button>
+  <select id="fontSelect">
+    <option value="sans-serif">Sans</option>
+    <option value="serif">Serif</option>
+    <option value="monospace">Mono</option>
+    <option value="cursive">Cursive</option>
+  </select>
+  <div id="colorPalette">
+    <span class="labelText">Color:</span>
+    <input type="color" id="colorInp" value="#000000">
+    <button style="background:#e74c3c" data-color="#e74c3c"></button>
+    <button style="background:#27ae60" data-color="#27ae60"></button>
+    <button style="background:#f1c40f" data-color="#f1c40f"></button>
+    <button style="background:#3498db" data-color="#3498db"></button>
+  </div>
+  <label><span class="labelText">Size:</span> <input type="range" id="sizeInp" min="1" max="30" value="5"></label>
+  <label><span class="labelText">Opacity:</span> <input type="range" id="opacityInp" min="0.1" max="1" step="0.1" value="1"></label>
+  <label>Shape:
+    <select id="shapeSelect">
+      <option value="">Insert Shape</option>
+      <option value="rectangle">Rectangle</option>
+      <option value="circle">Circle</option>
+      <option value="triangle">Triangle</option>
+    </select>
+  </label>
+  <label>W: <input type="number" id="shapeW" value="100" style="width:60px;"></label>
+  <label>H: <input type="number" id="shapeH" value="60" style="width:60px;"></label>
+  <button id="deleteBtn">Delete</button>
+  <button id="back">Send Backward</button>
+  <button id="front">Bring Forward</button>
+  <button id="undoBtn">Undo</button>
+  <button id="redoBtn">Redo</button>
+  <button id="nightBtn">🌙 Night Mode</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById('canvas'), ctx = canvas.getContext('2d');
+let tool='pencil', drawing=false, startX, startY;
+let brushSize=5, brushColor='#000', brushOpacity=1;
+let selected=null, offsetX=0, offsetY=0;
+let history=[], redoStack=[], objects=[]; 
+let currentFont='sans-serif';
+
+function resizeCanvas(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - document.getElementById('toolbar').offsetHeight;
+  redraw();
+}
+
+function saveHistory(clearRedo=true){
+  history.push(JSON.stringify(objects));
+  if(history.length > 100) history.shift();
+  if(clearRedo) redoStack = [];
+}
+
+function undo(){ if(history.length){ redoStack.push(JSON.stringify(objects)); objects=JSON.parse(history.pop()); selected=null; redraw(); }}
+function redo(){ if(redoStack.length){ history.push(JSON.stringify(objects)); objects=JSON.parse(redoStack.pop()); selected=null; redraw(); }}
+function setTool(t){
+  tool=t;
+  document.querySelectorAll('#toolbar button').forEach(b=>b.classList.remove('active'));
+  ({pencil:pencilBtn,line:lineBtn,select:selectBtn,eraser:eraserBtn,text:textBtn}[tool])?.classList.add('active');
+  selected=null; redraw();
+}
+
+const pencilBtn=document.getElementById('pencilBtn'),
+      lineBtn=document.getElementById('lineBtn'),
+      selectBtn=document.getElementById('selectBtn'),
+      eraserBtn=document.getElementById('eraserBtn'),
+      textBtn=document.getElementById('textBtn'),
+      fontSelect=document.getElementById('fontSelect'),
+      colorInp=document.getElementById('colorInp'),
+      sizeInp=document.getElementById('sizeInp'),
+      opacityInp=document.getElementById('opacityInp'),
+      shapeSelect=document.getElementById('shapeSelect'),
+      shapeW=document.getElementById('shapeW'),
+      shapeH=document.getElementById('shapeH'),
+      nightBtn=document.getElementById('nightBtn');
+
+pencilBtn.onclick=()=>setTool('pencil');
+lineBtn.onclick=()=>setTool('line');
+selectBtn.onclick=()=>setTool('select');
+eraserBtn.onclick=()=>setTool('eraser');
+textBtn.onclick=()=>setTool('text');
+document.getElementById('undoBtn').onclick=undo;
+document.getElementById('redoBtn').onclick=redo;
+nightBtn.onclick=()=>{ document.body.classList.toggle('night'); nightBtn.textContent=document.body.classList.contains('night')?'☀️ Day Mode':'🌙 Night Mode'; };
+document.querySelectorAll('#colorPalette button').forEach(b=>b.onclick=e=>brushColor=e.target.dataset.color);
+fontSelect.oninput=e=>currentFont=e.target.value;
+sizeInp.oninput=e=>brushSize=+e.target.value;
+opacityInp.oninput=e=>brushOpacity=+e.target.value;
+colorInp.oninput=e=>brushColor=e.target.value;
+
+document.getElementById('deleteBtn').onclick=()=>{ if(selected){ saveHistory(); objects=objects.filter(o=>o!==selected); selected=null; redraw(); }};
+document.getElementById('back').onclick=()=>{ if(selected){ const i=objects.indexOf(selected); if(i>0){ saveHistory(); objects.splice(i,1); objects.splice(i-1,0,selected); redraw(); }}};
+document.getElementById('front').onclick=()=>{ if(selected){ const i=objects.indexOf(selected); if(i<objects.length-1){ saveHistory(); objects.splice(i,1); objects.splice(i+1,0,selected); redraw(); }}};
+
+shapeSelect.onchange=()=>{
+  if(!shapeSelect.value)return;
+  const s=shapeSelect.value, w=+shapeW.value, h=+shapeH.value;
+  saveHistory();
+  objects.push({type:'shape',shape:s,x:canvas.width/2-w/2,y:canvas.height/2-h/2,w,h,color:brushColor,opacity:brushOpacity});
+  shapeSelect.value=''; redraw();
+};
+
+function hitTest(mx,my){
+  for(let i=objects.length-1;i>=0;i--){
+    const o=objects[i];
+    const bb = {x: o.x, y: o.y - (o.h || 40), w: o.w || 100, h: o.h || 40};
+    if(mx>=bb.x && mx<=bb.x+bb.w && my>=bb.y && my<=bb.y+bb.h) return o;
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e=>{
+  const mx=e.offsetX, my=e.offsetY;
+  startX=mx; startY=my;
+  if(tool==='select' && e.button===2){
+    const hit=hitTest(mx,my);
+    if(hit){
+      selected=hit;
+      offsetX=mx-hit.x;
+      offsetY=my-(hit.y-(hit.h||40));
+      drawing=true;
+      e.preventDefault();
+    }
+  } else if(tool!=='select' && e.button===0){
+    saveHistory();
+    drawing=true;
+    const col=tool==='eraser'?'#fff':brushColor;
+    const op=tool==='eraser'?1:brushOpacity;
+    if(tool==='pencil'||tool==='eraser'){
+      objects.push({type:'path',points:[{x:mx,y:my}],size:brushSize,color:col,opacity:op});
+    } else if(tool==='line'){
+      objects.push({type:'line',points:[{x:mx,y:my},{x:mx,y:my}],size:brushSize,color:col,opacity:op});
+    } else if(tool==='text'){
+      const txt=prompt('Enter text:')||''; ctx.font=`${brushSize*4}px ${currentFont}`;
+      const w=ctx.measureText(txt).width,h=brushSize*4;
+      objects.push({type:'text',text:txt,x:mx,y:my+h,w,h,font:currentFont,color:brushColor,opacity:brushOpacity,size:brushSize});
+      drawing=false; redraw();
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', e=>{
+  const mx=e.offsetX,my=e.offsetY;
+  if(drawing && tool==='select' && selected && e.buttons===2){
+    selected.x=mx-offsetX;
+    selected.y=my+(selected.h||40)-offsetY;
+    redraw();
+  } else if(drawing && tool!=='select'){
+    const o=objects[objects.length-1];
+    if(o.type==='path'){ o.points.push({x:mx,y:my}); }
+    else if(o.type==='line'){ o.points[1]={x:mx,y:my}; }
+    redraw();
+  }
+});
+
+canvas.addEventListener('mouseup', e=>{ if(e.button===2 && tool==='select'){ drawing=false; selected=null; } else { drawing=false; }});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+function redraw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(const o of objects){
+    ctx.globalAlpha=o.opacity; ctx.lineWidth=o.size||1;
+    ctx.strokeStyle=o.color; ctx.fillStyle=o.color;
+    if(o.type==='path'){ ctx.beginPath(); ctx.moveTo(o.points[0].x,o.points[0].y); o.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke(); }
+    else if(o.type==='line'){ ctx.beginPath(); ctx.moveTo(o.points[0].x,o.points[0].y); ctx.lineTo(o.points[1].x,o.points[1].y); ctx.stroke(); }
+    else if(o.type==='shape'){
+      if(o.shape==='rectangle'){ ctx.fillRect(o.x,o.y,o.w,o.h); }
+      else if(o.shape==='circle'){ ctx.beginPath(); ctx.arc(o.x+o.w/2,o.y+o.h/2,Math.min(o.w,o.h)/2,0,2*Math.PI); ctx.fill(); }
+      else if(o.shape==='triangle'){ ctx.beginPath(); ctx.moveTo(o.x+o.w/2,o.y); ctx.lineTo(o.x,o.y+o.h); ctx.lineTo(o.x+o.w,o.y+o.h); ctx.closePath(); ctx.fill(); }
+    } else if(o.type==='text'){ ctx.font=`${o.size*4}px ${o.font}`; ctx.fillText(o.text,o.x,o.y); }
+    if(o===selected){ ctx.save(); ctx.setLineDash([5]); ctx.strokeStyle='#0d6efd'; ctx.strokeRect(o.x,o.y-(o.h||40),o.w||100,o.h||40); ctx.restore(); }
+  }
+}
+window.addEventListener('keydown', e=>{ if(e.key==='p')setTool('pencil'); if(e.key==='l')setTool('line'); if(e.key==='s')setTool('select'); if(e.key==='e')setTool('eraser'); if(e.key==='t')setTool('text'); if(e.ctrlKey&&e.key==='z')undo(); if(e.ctrlKey&&e.key==='y')redo(); });
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+</script>
+
+</body>
+</html>
